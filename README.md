@@ -46,13 +46,29 @@
 
 ## 首次部署
 
+### 方式 A：一键脚本（推荐）
+
 ```bash
-# 1. 创建仓库并推送（需先 gh auth login）
+./deploy.sh                 # 默认仓库名 qqq-dashboard
+./deploy.sh 我的仓库名       # 自定义
+```
+
+脚本会依次完成：登录 GitHub → 创建仓库并推送 → 把 Pages 源设为
+"GitHub Actions" → 手动触发一次工作流并跟踪结果 → 打印访问地址。
+
+### 方式 B：手动
+
+```bash
+# 1. 登录（会打开浏览器授权）
+gh auth login --web --scopes 'repo,workflow'
+
+# 2. 创建仓库并推送
 gh repo create qqq-dashboard --public --source=. --remote=origin --push
 
-# 2. 开启 Pages：Settings → Pages → Source 选 "GitHub Actions"
+# 3. 开启 Pages（也可在 Settings → Pages → Source 选 "GitHub Actions"）
+gh api -X POST repos/<用户名>/qqq-dashboard/pages -f build_type=workflow
 
-# 3. 手动跑一次验证
+# 4. 手动跑一次验证
 gh workflow run dashboard.yml
 gh run watch
 ```
@@ -60,7 +76,8 @@ gh run watch
 > **Pages 与仓库可见性**：GitHub 免费账户的 Pages **只能用于公开仓库**。
 > 若要仓库私有同时开 Pages，需要 GitHub Pro。
 > 本仓库已用白名单 `.gitignore` 限定为**只发布 `dashboard/`**，
-> 研究脚本、中间数据、策略报告都不会被提交。
+> 研究脚本、中间数据、策略报告、`.codebuddy` 记忆文件都不会被提交
+> （实测追踪 15 个文件，已逐项核对）。
 
 ## 本地开发
 
