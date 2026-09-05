@@ -740,16 +740,8 @@ def main():
             expected = latest_expected_trade_date()
             if cached_last >= expected:
                 # 连增量请求都不必发：本来就没有新交易日
-                d = cache
-                d["meta"]["stale"] = False
-                d["meta"]["mode"] = "cache"
-                d["meta"]["note"] = ("无新交易日（最近应有行情日 %s，快照已是最新）"
-                                     % expected)
-                d["meta"]["xdxrFingerprint"] = new_fps
-                d["meta"]["checkedAt"] = datetime.now(CST).isoformat(timespec="seconds")
-                write_out(d["prices"], d["meta"])
                 print("[3/3] 无新交易日（应有行情日 %s ≤ 快照 %s），"
-                      "已跳过取数" % (expected, cached_last))
+                      "已跳过取数且保持快照文件不变" % (expected, cached_last))
                 return 0
 
             print("[3/3] 增量拉取（窗口 %d~%d 根/只，按缺失天数自适应）…"
@@ -811,13 +803,7 @@ def main():
     expected = latest_expected_trade_date()
     cached_last = cache["meta"].get("lastTradeDate") or ""
     if cached_last >= expected:
-        d = cache
-        d["meta"]["stale"] = False
-        d["meta"]["mode"] = "cache"
-        d["meta"]["note"] = "无新交易日（最近应有行情日 %s，快照已是最新）" % expected
-        d["meta"]["checkedAt"] = datetime.now(CST).isoformat(timespec="seconds")
-        write_out(d["prices"], d["meta"])
-        print("· 无新交易日（应有行情日 %s ≤ 快照 %s），保持不变"
+        print("· 无新交易日（应有行情日 %s ≤ 快照 %s），保持快照文件不变"
               % (expected, cached_last))
         return 0
 

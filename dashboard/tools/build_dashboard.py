@@ -58,7 +58,9 @@ def build_latest(res, meta, capital, cash_code):
     cur = last["weights"]
 
     rows = []
-    for c in sorted(set(cur) | set(prev), key=lambda x: -cur.get(x, 0)):
+    # 次关键字用代码排序，避免零权重标的因 set 遍历顺序随机换位，
+    # 从而让同一份行情反复生成不同的 dashboard.json。
+    for c in sorted(set(cur) | set(prev), key=lambda x: (-cur.get(x, 0), x)):
         ow, nw = prev.get(c, 0.0), cur.get(c, 0.0)
         act = action_of(ow, nw)
         rows.append({
@@ -197,11 +199,35 @@ def main():
         "rebalances": res["rebalances"][-60:],
     }
 
-    with open(OUT, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+    # 没有行情或计算结果变化时，保留原 builtAt 且不改写文件。
+    # 这样定时补跑不会只因时间戳变化制造无意义 commit。
+    unchanged = False
+    if os.path.exists(OUT):
+        try:
+            with open(OUT, "r", encoding="utf-8") as f:
+                old = json.load(f)
+            old_cmp = dict(old)
+            old_cmp["meta"] = dict(old.get("meta") or {})
+            old_cmp["meta"].pop("builtAt", None)
+            out_cmp = dict(out)
+            out_cmp["meta"] = dict(out.get("meta") or {})
+            out_cmp["meta"].pop("builtAt", None)
+            if old_cmp == out_cmp:
+                out["meta"]["builtAt"] = old.get("meta", {}).get(
+                    "builtAt", out["meta"]["builtAt"])
+                unchanged = True
+        except (OSError, ValueError, TypeError):
+            pass
+
+    if not unchanged:
+        with open(OUT, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
     sz = os.path.getsize(OUT) / 1024
-    print("✓ 已写入 %s（%.0f KB）" % (OUT, sz))
+    if unchanged:
+        print("✓ 计算结果无变化，保持 %s 不变（%.0f KB）" % (OUT, sz))
+    else:
+        print("✓ 已写入 %s（%.0f KB）" % (OUT, sz))
     print("  数据源 %s | 最新交易日 %s%s"
           % (pmeta.get("source"), pmeta.get("lastTradeDate"),
              "  ⚠ STALE" if pmeta.get("stale") else ""))
