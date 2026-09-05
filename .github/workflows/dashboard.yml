@@ -32,14 +32,14 @@ jobs:
     outputs:
       data_ok: ${{ steps.fetch.outputs.ok }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1      # 只要最新一次提交：数据文件每天都变，全history没用还慢
 
       # ⚠ tdxrs 0.6.7 硬要求 Python >= 3.11（只提供 cp311 wheel，
       #   其余是 Rust 源码包需编译链）。不要降到 3.10。
       - name: 配置 Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip          # 缓存 wheel，省掉每次重新下载 tdxrs 的时间
@@ -160,7 +160,7 @@ jobs:
           fi
 
       - name: 打包 Pages 产物
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: dashboard
 
@@ -173,4 +173,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
