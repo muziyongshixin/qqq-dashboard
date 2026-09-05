@@ -1,0 +1,176 @@
+name: 每日更新策略看板
+
+on:
+  schedule:
+    # ⚠ GitHub Actions 的 cron 一律按 **UTC** 解释，没有时区参数。
+    #   北京时间（UTC+8）16:10  →  UTC 08:10
+    #
+    #   主运行：每天 16:10（北京），A 股 15:00 收盘后 70 分钟，行情已落库。
+    - cron: '10 8 * * *'
+    #
+    #   补跑：每天 18:10（北京）。GitHub 的定时任务在整点前后是高峰，
+    #   官方明确说明**可能延迟数分钟到数十分钟，甚至被丢弃**，
+    #   所以留一次补跑做安全网。
+    #   若当天已更新成功，脚本会走"无新交易日"短路（零请求、不提交），
+    #   因此这次补跑几乎不花时间，也不会产生多余 commit。
+    #   不需要的话直接删掉下面这行即可。
+    - cron: '10 10 * * *'
+  workflow_dispatch:          # 支持手动触发（改完代码想立刻看效果时用）
+
+permissions:
+  contents: write             # 需要提交更新后的数据
+  pages: write
+  id-token: write
+
+concurrency:
+  group: dashboard-daily
+  cancel-in-progress: false   # 数据任务不要中途取消，避免半截提交
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    outputs:
+      data_ok: ${{ steps.fetch.outputs.ok }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1      # 只要最新一次提交：数据文件每天都变，全history没用还慢
+
+      # ⚠ tdxrs 0.6.7 硬要求 Python >= 3.11（只提供 cp311 wheel，
+      #   其余是 Rust 源码包需编译链）。不要降到 3.10。
+      - name: 配置 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip          # 缓存 wheel，省掉每次重新下载 tdxrs 的时间
+
+      - name: 安装 tdxrs
+        run: |
+          python -m pip install --upgrade pip
+          pip install tdxrs
+          python -c "import tdxrs, importlib.metadata as m; print('tdxrs', m.version('tdxrs'))"
+
+      - name: 拉取行情（除权监控 → 增量/全量自动切换）
+        id: fetch
+        working-directory: dashboard
+        run: |
+          echo "── 更新前快照状态 ──"
+          python - <<'PY'
+          import json, os
+          p = 'data/prices.json'
+          if not os.path.exists(p):
+              print("无快照，将全量构建"); raise SystemExit
+          m = json.load(open(p))['meta']
+          print(f"末交易日={m.get('lastTradeDate')} 上次模式={m.get('mode','?')} "
+                f"K线总数={sum(c['bars'] for c in m['codes'].values())}")
+          PY
+
+          set +e
+          python tools/fetch_prices.py
+          code=$?
+          set -e
+          echo "exit=$code"
+          # 退出码语义：0=成功(含"无新交易日") 1=降级/未更新但快照仍可用 2=致命
+          if [ "$code" -ge 2 ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::取数致命失败，终止本次发布以避免脏数据"
+            exit 1
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+          # 把本次实际走的路径写进 Actions 摘要，便于回溯"哪天做了全量重建"
+          python - <<'PY'
+          import json, os
+          m = json.load(open('data/prices.json'))['meta']
+          mode = m.get('mode', '?')
+          label = {'incremental': '增量更新', 'full': '全量重建',
+                   'cache': '无新交易日（未取数）'}.get(mode, mode)
+          line = (f"**取数模式：{label}** · 末交易日 `{m.get('lastTradeDate')}` "
+                  f"· 源 `{m.get('source')}`\n\n{m.get('note','')}\n")
+          print(line)
+          s = os.environ.get('GITHUB_STEP_SUMMARY')
+          if s:
+              open(s, 'a').write("### 行情更新\n" + line + "\n")
+          PY
+
+      - name: 计算指标与调仓信号
+        working-directory: dashboard
+        run: python tools/build_dashboard.py
+
+      - name: 数据自检（不通过则不发布）
+        working-directory: dashboard
+        run: |
+          python - <<'PY'
+          import json, sys, datetime
+          d = json.load(open('data/dashboard.json'))
+          p = json.load(open('data/prices.json'))
+          m, c = d['meta'], d['curve']
+          pm = p['meta']
+          errs = []
+          if len(c) < 2000:
+              errs.append(f"净值曲线仅 {len(c)} 点，疑似数据残缺")
+          if not d.get('latest'):
+              errs.append("缺少本周调仓信号")
+          if not d['windows'].get('all'):
+              errs.append("缺少全样本指标")
+          # 末日净值必须为正且有限
+          if not (c and c[-1][1] > 0):
+              errs.append("末日净值异常")
+          # 最新交易日不应过旧（容忍长假：10 天）
+          last = datetime.date.fromisoformat(m['lastTradeDate'])
+          gap = (datetime.date.today() - last).days
+          if gap > 10:
+              errs.append(f"最新交易日 {m['lastTradeDate']} 距今 {gap} 天，数据可能停更")
+          # 除权指纹必须齐全：缺失会导致下次无法判断能否增量（只能全量）
+          fps = pm.get('xdxrFingerprint') or {}
+          missing = [k for k in pm['codes'] if k not in fps]
+          if missing:
+              errs.append(f"除权指纹缺失 {len(missing)} 只：{missing}")
+          # 各标的末日必须一致，否则权重会失真
+          ends = {code: info['range'][1] for code, info in pm['codes'].items()}
+          if len(set(ends.values())) > 1:
+              errs.append(f"各标的末交易日不一致：{ends}")
+          if errs:
+              print("自检未通过：")
+              for e in errs: print("  -", e)
+              sys.exit(1)
+          print(f"自检通过 | 模式={pm.get('mode')} 源={m['dataSource']} "
+                f"最新={m['lastTradeDate']} stale={m['stale']} 点数={len(c)}")
+          print(f"  除权指纹 {len(fps)}/{len(pm['codes'])} 只齐全，各标的末日一致")
+          print(f"  全样本 年化 {d['windows']['all']['cagr']}% "
+                f"夏普 {d['windows']['all']['sharpe']} MDD {d['windows']['all']['mdd']}%")
+          PY
+
+      - name: 提交数据变更
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dashboard/data/prices.json dashboard/data/dashboard.json
+          if git diff --staged --quiet; then
+            echo "数据无变化（非交易日或行情未更新），跳过提交"
+          else
+            INFO=$(python -c "
+          import json
+          m = json.load(open('dashboard/data/prices.json'))['meta']
+          mode = {'incremental':'增量','full':'全量重建','cache':'无变化'}.get(m.get('mode'), m.get('mode'))
+          print('%s|%s' % (m['lastTradeDate'], mode))")
+            LAST=${INFO%%|*}; MODE=${INFO##*|}
+            git commit -m "chore(data): 更新至 $LAST（$MODE）[skip ci]"
+            git push
+          fi
+
+      - name: 打包 Pages 产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard
+
+  deploy:
+    needs: update
+    if: needs.update.outputs.data_ok == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

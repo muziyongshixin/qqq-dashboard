@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QQQ-RP 策略监控看板</title>
+<script src="./vendor/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{
+  --bg:#0b1020; --bg2:#111832; --card:#141c38; --line:#243055;
+  --fg:#e8ecf8; --dim:#8b97b8; --dim2:#5d6a8c;
+  --up:#10b981; --dn:#ef4444; --wa:#f59e0b; --inf:#38bdf8; --pur:#a78bfa;
+}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(180deg,#0b1020,#0d1226 60%,#0b1020);
+  color:var(--fg);font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;}
+.wrap{max-width:1360px;margin:0 auto;padding:22px 20px 60px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:20px}
+h1{margin:0;font-size:23px;letter-spacing:.3px}
+h1 small{color:var(--dim);font-weight:400;font-size:13px;margin-left:8px}
+.src{font-size:12.5px;color:var(--dim);text-align:right;line-height:1.9}
+.tag{display:inline-block;padding:2px 8px;border-radius:5px;font-size:11.5px;font-weight:600;margin-left:6px}
+.tag.ok{background:rgba(16,185,129,.16);color:#34d399}
+.tag.stale{background:rgba(239,68,68,.16);color:#f87171}
+h2{font-size:17px;margin:30px 0 12px;padding-left:11px;border-left:3px solid var(--inf)}
+h2 .sub{font-size:12.5px;color:var(--dim);font-weight:400;margin-left:8px}
+
+.grid{display:grid;gap:12px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(148px,1fr));margin-bottom:6px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:13px 15px}
+.kpi .k{font-size:12px;color:var(--dim);margin-bottom:5px}
+.kpi .v{font-size:22px;font-weight:700;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
+.kpi .d{font-size:11.5px;color:var(--dim2);margin-top:3px}
+.up{color:var(--up)} .dn{color:var(--dn)} .wa{color:var(--wa)} .inf{color:var(--inf)}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.chart{height:340px;width:100%}
+.chart.sm{height:170px}
+
+/* 区间指标条（跟随净值图的区间选择联动） */
+#rangeStats{margin-top:15px;padding-top:14px;border-top:1px solid var(--line)}
+.rsHead{font-size:12.5px;color:var(--dim);margin-bottom:11px;
+  display:flex;align-items:baseline;gap:9px;font-weight:600}
+.rsHead span{font-weight:400;color:var(--dim2);font-size:11.5px;
+  font-variant-numeric:tabular-nums}
+.rsGrid{display:grid;gap:9px;grid-template-columns:repeat(auto-fit,minmax(122px,1fr))}
+.rs{background:var(--bg2,rgba(255,255,255,.02));border:1px solid var(--line);
+  border-radius:9px;padding:10px 12px}
+.rs .k{font-size:11.5px;color:var(--dim);margin-bottom:4px}
+.rs .v{font-size:18px;font-weight:700;letter-spacing:-.3px;
+  font-variant-numeric:tabular-nums;line-height:1.2}
+.rs .d{font-size:11px;color:var(--dim2);margin-top:3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:640px){
+  .rsGrid{grid-template-columns:repeat(2,1fr)}
+  .rs .v{font-size:16px}
+}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--dim);margin-bottom:9px}
+.legend i{display:inline-block;width:11px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid rgba(36,48,85,.7)}
+th{color:var(--dim);font-weight:600;font-size:12px;background:rgba(20,28,56,.6);
+  position:sticky;top:0;backdrop-filter:blur(4px)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tbody tr:hover{background:rgba(56,189,248,.055)}
+.bar{display:inline-block;height:7px;border-radius:4px;background:var(--inf);vertical-align:middle;margin-right:7px;min-width:2px}
+.bar.bond{background:var(--pur)} .bar.cash{background:var(--dim2)}
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11.5px;font-weight:600}
+.pill.buy{background:rgba(16,185,129,.16);color:#34d399}
+.pill.add{background:rgba(56,189,248,.16);color:#7dd3fc}
+.pill.cut{background:rgba(245,158,11,.16);color:#fbbf24}
+.pill.sell{background:rgba(239,68,68,.16);color:#f87171}
+.pill.hold{background:rgba(139,151,184,.14);color:var(--dim)}
+
+.tabs{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap}
+.tab{padding:6px 15px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);
+  color:var(--dim);cursor:pointer;font-size:13px;transition:.15s}
+.tab:hover{color:var(--fg);border-color:#31406e}
+.tab.on{background:rgba(56,189,248,.15);color:#7dd3fc;border-color:rgba(56,189,248,.45)}
+
+.note{background:rgba(56,189,248,.07);border-left:3px solid var(--inf);
+  border-radius:0 8px 8px 0;padding:11px 15px;font-size:13px;color:#c7d2e8;margin:12px 0}
+.note.warn{background:rgba(245,158,11,.08);border-color:var(--wa)}
+.note.danger{background:rgba(239,68,68,.08);border-color:var(--dn)}
+.note b{color:var(--fg)}
+.scroll{max-height:430px;overflow:auto;border-radius:9px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:900px){.two{grid-template-columns:1fr}.chart{height:280px}}
+footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--dim2);line-height:1.9}
+#err{display:none;padding:16px;background:rgba(239,68,68,.1);border:1px solid var(--dn);
+  border-radius:10px;color:#fca5a5}
+.ctrl{display:flex;gap:10px;align-items:center;font-size:13px;color:var(--dim);flex-wrap:wrap}
+.ctrl input{background:var(--bg2);border:1px solid var(--line);color:var(--fg);
+  border-radius:7px;padding:5px 10px;width:118px;font-size:13px;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1>QQQ-RP 策略监控看板<small>多资产动量 × 风险平价 × 波动率目标</small></h1>
+    <div style="font-size:12.5px;color:var(--dim);margin-top:5px" id="paramLine"></div>
+  </div>
+  <div class="src" id="srcInfo">加载中…</div>
+</header>
+
+<div id="err"></div>
+
+<!-- ═══ 1. 核心指标 ═══ -->
+<div class="grid kpis" id="kpiAll"></div>
+
+<!-- ═══ 2. 滚动区间指标 ═══ -->
+<h2>滚动区间指标<span class="sub">区间累计收益 · 波动/夏普按年化口径以便横向比较</span></h2>
+<div class="card scroll">
+  <table id="winTable"><thead><tr>
+    <th>区间</th><th class="num">收益</th><th class="num">最大回撤</th>
+    <th class="num">夏普</th><th class="num">Sortino</th><th class="num">Calmar</th>
+    <th class="num">年化波动</th><th class="num">日胜率</th><th class="num">最好/最差单日</th>
+    <th class="num">交易日</th>
+  </tr></thead><tbody></tbody></table>
+</div>
+<div class="note" id="winNote"></div>
+
+<!-- ═══ 3. 本周调仓 ═══ -->
+<h2>本周调仓动作<span class="sub" id="rebSub"></span></h2>
+<div class="card" style="margin-bottom:12px">
+  <div class="ctrl">
+    <span>本金</span>
+    <input id="capInput" type="number" value="100000" step="10000" min="1000">
+    <span>元 · 下方金额随之换算</span>
+    <span style="margin-left:auto;color:var(--dim2)" id="rebMeta"></span>
+  </div>
+</div>
+<div class="card scroll">
+  <table id="rebTable"><thead><tr>
+    <th>标的</th><th>动作</th><th class="num">上期权重</th><th class="num">目标权重</th>
+    <th class="num">变动</th><th>目标占比</th><th class="num">目标金额</th><th class="num">调整金额</th>
+  </tr></thead><tbody></tbody></table>
+</div>
+
+<!-- ═══ 4. 净值与回撤 ═══ -->
+<h2>净值曲线与回撤<span class="sub">每日收盘更新</span></h2>
+<div class="tabs" id="rangeTabs">
+  <div class="tab" data-r="1m">近1月</div>
+  <div class="tab" data-r="3m">近3月</div>
+  <div class="tab" data-r="6m">近6月</div>
+  <div class="tab" data-r="1y">近1年</div>
+  <div class="tab" data-r="3y">近3年</div>
+  <div class="tab on" data-r="all">全部</div>
+</div>
+<div class="card">
+  <div class="legend">
+    <span><i style="background:#38bdf8"></i>策略净值</span>
+    <span><i style="background:#8b97b8"></i><span id="bmName">基准</span></span>
+  </div>
+  <div class="chart" id="chartNav"></div>
+  <div class="legend" style="margin-top:12px"><span><i style="background:#ef4444"></i>回撤（%）</span></div>
+  <div class="chart sm" id="chartDD"></div>
+
+  <!-- 区间指标条：随上方区间选择联动，口径与全样本一致（rf=2%、日频×252） -->
+  <div id="rangeStats"></div>
+</div>
+<div class="note" id="rangeNote"></div>
+
+<!-- ═══ 5. 逐年 + 水下期 ═══ -->
+<div class="two" style="margin-top:12px">
+  <div>
+    <h2 style="margin-top:18px">逐年收益</h2>
+    <div class="card scroll" style="max-height:360px">
+      <table id="yearTable"><thead><tr><th>年份</th><th class="num">收益</th><th>分布</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+  <div>
+    <h2 style="margin-top:18px">最长水下期<span class="sub">从历史新高到再创新高</span></h2>
+    <div class="card scroll" style="max-height:360px">
+      <table id="uwTable"><thead><tr>
+        <th>起点（新高）</th><th>谷底</th><th class="num">最深</th><th class="num">历时</th><th>恢复</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+<div class="note warn" id="uwNote"></div>
+
+<!-- ═══ 6. 调仓历史 ═══ -->
+<h2>调仓历史<span class="sub">最近 60 期</span></h2>
+<div class="card scroll">
+  <table id="histTable"><thead><tr>
+    <th>信号日</th><th class="num">选中</th><th class="num">事前波动</th><th class="num">缩放</th>
+    <th class="num">风险仓位</th><th class="num">现金</th><th class="num">换手</th><th>持仓</th>
+  </tr></thead><tbody></tbody></table>
+</div>
+
+<footer>
+  数据源：<b>tdxrs（通达信直连，官方除权除息前复权）</b>；不可用时按收益率拼接东财增量并标记状态<br>
+  夏普口径：(CAGR − 2%) / 年化波动（日收益 ×√252）。<b>注意与聚宽平台口径不同</b>
+  （聚宽用 rf=4% + 日收益×√250，本策略波动 8~9% 时聚宽夏普约低 0.28）<br>
+  ⚠ 回测指标含约 <b>0.5 夏普的资产池事后选择偏差</b>（把 13 只换成同大类其他 ETF，夏普从 1.22 掉到 0.65）。<br>
+  <b>实盘合理预期：夏普 0.7~1.0、年化 7~10%、最大回撤 -15%~-18%。</b>本页为研究记录，不构成投资建议。
+</footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmtPct = (v,d=2) => (v==null||isNaN(v)) ? '—' : (v>0?'+':'') + Number(v).toFixed(d) + '%';
+const cls = v => v==null ? '' : (v>0?'up':(v<0?'dn':''));
+const money = v => (v==null||isNaN(v)) ? '—' :
+  '¥' + Math.round(v).toLocaleString('zh-CN');
+
+let D=null, capital=100000, navChart, ddChart, navS, bmS, ddS;
+
+function showErr(msg){
+  const e=$('#err'); e.style.display='block';
+  e.innerHTML='<b>加载失败：</b>'+msg+
+    '<br><br>本地预览请在 <code>dashboard/</code> 目录执行：<code>python3 -m http.server 8899</code>'+
+    '<br>然后访问 <code>http://localhost:8899/</code>（直接双击 HTML 会因浏览器 CORS 限制无法读取 JSON）';
+}
+
+/* ── 顶部信息 ── */
+function renderHead(){
+  const m=D.meta, p=m.params;
+  $('#paramLine').innerHTML =
+    `动量 ${p.lookbacks.join('/')}周（>${p.scoreThreshold*100}%窗口上涨入选） · `+
+    `风险 EWMA λ=${p.lambdaEwma} <b class="inf">日频</b> · 目标波动 ${(p.targetVol*100).toFixed(0)}% · `+
+    `债券上限 ${(p.bondCap*100).toFixed(0)}% · 不加杠杆`;
+  const stale = m.stale;
+  $('#srcInfo').innerHTML =
+    `数据源 <b>${m.dataSource||'—'}</b>`+
+    `<span class="tag ${stale?'stale':'ok'}">${stale?'数据未更新':'正常'}</span><br>`+
+    `最新交易日 <b>${m.lastTradeDate||'—'}</b><br>`+
+    `构建 ${(m.builtAt||'').replace('T',' ').slice(0,16)}`+
+    (m.note?`<br><span class="wa">${m.note}</span>`:'');
+}
+
+/* ── 核心 KPI ── */
+function renderKpi(){
+  const a=D.windows.all, y=D.windows.ytd, m1=D.windows.m1, m3=D.windows.m3;
+  const eq=D.curve[D.curve.length-1][1], init=D.meta.capital;
+  const box=[
+    ['当前净值', (eq/init).toFixed(4), `¥${Math.round(eq).toLocaleString()} / 初始 ¥${init.toLocaleString()}`, ''],
+    ['累计收益', fmtPct(a.totalReturn,1), `${a.start} 起 ${a.days} 交易日`, cls(a.totalReturn)],
+    ['年化收益', fmtPct(a.cagr), '全样本 CAGR', cls(a.cagr)],
+    ['夏普比率', a.sharpe.toFixed(3), 'rf=2% · 日频年化', a.sharpe>1?'up':''],
+    ['最大回撤', fmtPct(a.mdd), `谷底 ${a.mddDate}`, 'dn'],
+    ['Calmar', a.calmar.toFixed(3), '年化 / 最大回撤', a.calmar>1?'up':''],
+    ['今年以来', y?fmtPct(y.totalReturn):'—', y?`夏普 ${y.sharpe.toFixed(2)}`:'', y?cls(y.totalReturn):''],
+    ['近1月', m1?fmtPct(m1.totalReturn):'—', m3?`近3月 ${fmtPct(m3.totalReturn)}`:'', m1?cls(m1.totalReturn):''],
+  ];
+  $('#kpiAll').innerHTML = box.map(([k,v,d,c])=>
+    `<div class="kpi"><div class="k">${k}</div><div class="v ${c}">${v}</div><div class="d">${d}</div></div>`).join('');
+}
+
+/* ── 滚动区间表 ── */
+function renderWindows(){
+  const order=[['m1','近 1 个月'],['m3','近 3 个月'],['m6','近 6 个月'],
+               ['m12','近 12 个月'],['ytd','今年以来'],['all','全样本']];
+  $('#winTable tbody').innerHTML = order.filter(([k])=>D.windows[k]).map(([k,lbl])=>{
+    const w=D.windows[k], strong = k==='all';
+    return `<tr${strong?' style="background:rgba(56,189,248,.06)"':''}>
+      <td><b>${lbl}</b><br><span style="font-size:11px;color:var(--dim2)">${w.start} → ${w.end}</span></td>
+      <td class="num ${cls(w.totalReturn)}"><b>${fmtPct(w.totalReturn)}</b></td>
+      <td class="num dn">${fmtPct(w.mdd)}</td>
+      <td class="num ${w.sharpe>1?'up':''}"><b>${w.sharpe.toFixed(2)}</b></td>
+      <td class="num">${w.sortino.toFixed(2)}</td>
+      <td class="num">${w.calmar.toFixed(2)}</td>
+      <td class="num">${w.vol.toFixed(2)}%</td>
+      <td class="num">${w.winRate.toFixed(1)}%</td>
+      <td class="num"><span class="up">${fmtPct(w.best)}</span> / <span class="dn">${fmtPct(w.worst)}</span></td>
+      <td class="num">${w.days}</td></tr>`;
+  }).join('');
+  $('#winNote').innerHTML =
+    `<b>短窗口的夏普不要当真</b>：1 个月只有约 20 个交易日，年化后噪声极大`+
+    (D.windows.m1?`（本期近1月夏普 ${D.windows.m1.sharpe.toFixed(2)}）`:'')+
+    `。判断策略是否正常，请看<b>近 6 月 / 今年以来</b>，并对照全样本区间。`+
+    `年换手 ${D.meta.turnoverPerYear}%、年成本 ${D.meta.costPerYear}%（已扣在净值里）。`;
+}
+
+/* ── 本周调仓 ── */
+function renderReb(){
+  const L=D.latest;
+  if(!L){ $('#rebTable tbody').innerHTML='<tr><td colspan="8">无调仓数据</td></tr>'; return; }
+  $('#rebSub').textContent = `信号日 ${L.signalDate} · 选中 ${L.nSelected}/${L.nEligible} 只可选标的`;
+  $('#rebMeta').innerHTML =
+    `事前波动 <b>${L.exAnteVol!=null?L.exAnteVol+'%':'—'}</b> → 缩放 <b>${L.scale.toFixed(3)}</b>`+
+    ` · 风险仓位 <b class="inf">${L.riskWeight}%</b> · 现金 <b>${L.cashWeight}%</b>`+
+    ` · 换手 ${L.turnover}% · 成本 ${L.cost}%`;
+  const pc={'买入':'buy','加仓':'add','减仓':'cut','清仓':'sell','持有':'hold'};
+  const mx=Math.max(...L.rows.map(r=>r.weight),1);
+  $('#rebTable tbody').innerHTML = L.rows.map(r=>{
+    const bc = r.isCash?'cash':(r.isBond?'bond':'');
+    const hide = r.weight<0.005 && Math.abs(r.delta)<0.005;
+    return `<tr${hide?' style="opacity:.42"':''}>
+      <td><b>${r.name}</b> <span style="color:var(--dim2);font-size:11.5px">${r.code}</span>
+        ${r.isBond?'<span class="pill hold" style="margin-left:5px">债</span>':''}
+        ${r.isCash?'<span class="pill hold" style="margin-left:5px">现金</span>':''}</td>
+      <td><span class="pill ${pc[r.action]||'hold'}">${r.action}</span></td>
+      <td class="num" style="color:var(--dim)">${r.prevWeight.toFixed(2)}%</td>
+      <td class="num"><b>${r.weight.toFixed(2)}%</b></td>
+      <td class="num ${cls(r.delta)}">${r.delta===0?'—':fmtPct(r.delta)}</td>
+      <td><span class="bar ${bc}" style="width:${Math.max(2,r.weight/mx*118)}px"></span></td>
+      <td class="num">${money(r.weight/100*capital)}</td>
+      <td class="num ${cls(r.deltaAmount)}">${Math.abs(r.delta)<0.005?'—':
+        (r.delta>0?'+':'−')+money(Math.abs(r.delta)/100*capital).slice(1)}</td></tr>`;
+  }).join('');
+}
+
+/* ── 图表 ── */
+function initCharts(){
+  const base={layout:{background:{color:'transparent'},textColor:'#8b97b8',
+      fontFamily:'-apple-system,PingFang SC,sans-serif'},
+    grid:{vertLines:{color:'rgba(36,48,85,.45)'},horzLines:{color:'rgba(36,48,85,.45)'}},
+    rightPriceScale:{borderColor:'#243055'},timeScale:{borderColor:'#243055'},
+    crosshair:{mode:1}};
+  navChart=LightweightCharts.createChart($('#chartNav'),base);
+  navS=navChart.addSeries(LightweightCharts.LineSeries,
+    {color:'#38bdf8',lineWidth:2,priceFormat:{type:'price',precision:0,minMove:1}});
+  bmS=navChart.addSeries(LightweightCharts.LineSeries,
+    {color:'#8b97b8',lineWidth:1,lineStyle:2,priceFormat:{type:'price',precision:0,minMove:1}});
+  ddChart=LightweightCharts.createChart($('#chartDD'),
+    Object.assign({},base,{rightPriceScale:{borderColor:'#243055'}}));
+  ddS=ddChart.addSeries(LightweightCharts.AreaSeries,
+    {lineColor:'#ef4444',topColor:'rgba(239,68,68,.05)',bottomColor:'rgba(239,68,68,.35)',
+     lineWidth:1,priceFormat:{type:'price',precision:2,minMove:.01}});
+  // 两图时间轴联动
+  navChart.timeScale().subscribeVisibleLogicalRangeChange(r=>
+    r&&ddChart.timeScale().setVisibleLogicalRange(r));
+  ddChart.timeScale().subscribeVisibleLogicalRangeChange(r=>
+    r&&navChart.timeScale().setVisibleLogicalRange(r));
+  new ResizeObserver(()=>{
+    navChart.applyOptions({width:$('#chartNav').clientWidth});
+    ddChart.applyOptions({width:$('#chartDD').clientWidth});
+  }).observe($('#chartNav'));
+}
+
+function cutDate(range){
+  const last=D.curve[D.curve.length-1][0], d=new Date(last);
+  const map={'1m':1,'3m':3,'6m':6,'1y':12,'3y':36};
+  if(!map[range]) return null;
+  d.setMonth(d.getMonth()-map[range]);
+  return d.toISOString().slice(0,10);
+}
+
+function drawCharts(range){
+  const cut=cutDate(range);
+  const f=a=>(cut?a.filter(p=>p[0]>=cut):a).map(p=>({time:p[0],value:p[1]}));
+  navS.setData(f(D.curve));
+  if(D.benchmark&&D.benchmark.length){
+    // 基准在所选区间内重新归一到策略同起点，保证同图可比
+    const s=cut?D.curve.filter(p=>p[0]>=cut):D.curve;
+    const b=cut?D.benchmark.filter(p=>p[0]>=cut):D.benchmark;
+    if(s.length&&b.length){
+      const k=s[0][1]/b[0][1];
+      bmS.setData(b.map(p=>({time:p[0],value:p[1]*k})));
+    }
+  }
+  // 回撤在所选区间内以区间起点为新的峰值起算
+  const dd=cut?D.curve.filter(p=>p[0]>=cut):D.curve;
+  let peak=null;
+  ddS.setData(dd.map(p=>{
+    peak = peak===null?p[1]:Math.max(peak,p[1]);
+    return {time:p[0],value:+((p[1]/peak-1)*100).toFixed(3)};
+  }));
+  navChart.timeScale().fitContent(); ddChart.timeScale().fitContent();
+  renderRangeStats(range, cut);
+}
+
+/* ── 区间指标（前端实时计算，随区间联动）──────────────────────────
+   为什么在前端算而不是读 D.windows：
+     · 区间标签是 1m/3m/6m/1y/3y/all，而后端 windows 只有 m1/m3/m6/m12/ytd/all，
+       **近 3 年没有对应条目**；
+     · 前端按「图上实际显示的那段曲线」计算，能保证数字与图形**严格一致**
+       （尤其回撤：区间视图以区间起点为新峰值起算，与后端全样本口径不同）。
+   口径与 tools/engine.py 的 _stats_from_daily 完全对齐：
+     日收益 → 年化系数 252、rf=2%、样本方差用 n-1、夏普用 (CAGR − rf)/vol。
+*/
+const RF=0.02, PPY=252;
+
+function statsOf(curve){
+  if(!curve||curve.length<3) return null;
+  const v=curve.map(p=>p[1]), n=v.length-1;
+  const rets=[]; for(let i=1;i<v.length;i++) rets.push(v[i]/v[i-1]-1);
+  const mu=rets.reduce((a,b)=>a+b,0)/n;
+  const varr = n>1 ? rets.reduce((a,x)=>a+(x-mu)*(x-mu),0)/(n-1) : 0;
+  const vol=Math.sqrt(varr*PPY);
+  const years=n/PPY;
+  const total=v[v.length-1]/v[0]-1;
+  const cagr = years>0 ? Math.pow(v[v.length-1]/v[0],1/years)-1 : 0;
+
+  // 区间内回撤：以区间起点为初始峰值（与图上回撤曲线同口径）
+  let peak=v[0], mdd=0, mddDate=null;
+  curve.forEach(([d,x])=>{ peak=Math.max(peak,x); const dd=x/peak-1;
+    if(dd<mdd){ mdd=dd; mddDate=d; } });
+
+  const dn=rets.map(x=>Math.min(0,x-RF/PPY));
+  const dvol=Math.sqrt(dn.reduce((a,x)=>a+x*x,0)/n)*Math.sqrt(PPY);
+  const up=rets.filter(x=>x>0).reduce((a,b)=>a+b,0);
+  const down=-rets.filter(x=>x<0).reduce((a,b)=>a+b,0);
+
+  return {
+    start:curve[0][0], end:curve[curve.length-1][0], days:curve.length,
+    totalReturn:total*100, cagr:cagr*100, vol:vol*100,
+    sharpe: vol>1e-12 ? (cagr-RF)/vol : 0,
+    sortino: dvol>1e-12 ? (cagr-RF)/dvol : 0,
+    mdd:mdd*100, mddDate,
+    calmar: mdd<-1e-12 ? cagr/Math.abs(mdd) : 0,
+    winRate: 100*rets.filter(x=>x>0).length/n,
+    profitFactor: down>1e-12 ? up/down : null,
+    best:Math.max(...rets)*100, worst:Math.min(...rets)*100,
+  };
+}
+
+const RANGE_LABEL={'1m':'近 1 个月','3m':'近 3 个月','6m':'近 6 个月',
+                   '1y':'近 1 年','3y':'近 3 年','all':'全部区间'};
+
+function renderRangeStats(range, cut){
+  const sub = cut ? D.curve.filter(p=>p[0]>=cut) : D.curve;
+  const s = statsOf(sub);
+  const host = $('#rangeStats');
+  if(!s){ host.innerHTML=''; $('#rangeNote').innerHTML=''; return; }
+
+  // 同区间基准表现，用于算超额
+  let bmRet=null;
+  if(D.benchmark&&D.benchmark.length){
+    const b = cut ? D.benchmark.filter(p=>p[0]>=cut) : D.benchmark;
+    if(b.length>2) bmRet = (b[b.length-1][1]/b[0][1]-1)*100;
+  }
+
+  // 短窗口年化/夏普噪声极大，不误导用户：<60 交易日只给区间累计
+  const shortWin = s.days<60;
+  const items=[
+    ['区间收益', fmtPct(s.totalReturn), `${s.days} 个交易日`, cls(s.totalReturn)],
+    ['年化收益', shortWin?'—':fmtPct(s.cagr), shortWin?'样本过短不年化':'CAGR', shortWin?'':cls(s.cagr)],
+    ['夏普比率', shortWin?'—':s.sharpe.toFixed(2), shortWin?'样本过短':'rf=2% · 日频年化',
+      (!shortWin&&s.sharpe>1)?'up':''],
+    ['最大回撤', fmtPct(s.mdd), s.mddDate?`谷底 ${s.mddDate}`:'', 'dn'],
+    ['年化波动', s.vol.toFixed(2)+'%', `Sortino ${shortWin?'—':s.sortino.toFixed(2)}`, ''],
+    ['Calmar', shortWin?'—':s.calmar.toFixed(2), '年化 / 最大回撤',
+      (!shortWin&&s.calmar>1)?'up':''],
+    ['日胜率', s.winRate.toFixed(1)+'%',
+      s.profitFactor!=null?`盈亏比 ${s.profitFactor.toFixed(2)}`:'', ''],
+    ['超额收益', bmRet==null?'—':fmtPct(s.totalReturn-bmRet),
+      bmRet==null?'':`基准 ${fmtPct(bmRet)}`, bmRet==null?'':cls(s.totalReturn-bmRet)],
+  ];
+  host.innerHTML =
+    `<div class="rsHead">${RANGE_LABEL[range]||range}指标`+
+    `<span>${s.start} → ${s.end}</span></div>`+
+    `<div class="rsGrid">`+items.map(([k,v,d,c])=>
+      `<div class="rs"><div class="k">${k}</div><div class="v ${c}">${v}</div>`+
+      `<div class="d">${d}</div></div>`).join('')+`</div>`;
+
+  $('#rangeNote').innerHTML = shortWin
+    ? `<b>本区间样本仅 ${s.days} 个交易日</b>，年化收益与夏普会被噪声严重放大，`+
+      `因此这里只显示<b>区间累计收益</b>。要判断策略是否正常，请切到<b>近 6 月</b>或更长区间。`
+    : `<b>区间内回撤以区间起点为新的峰值起算</b>（与上方回撤图同口径），`+
+      `所以短区间的最大回撤通常小于全样本的 ${D.windows.all?fmtPct(D.windows.all.mdd):'—'}，`+
+      `这不是策略变好，只是起算点不同。夏普口径 (年化 − 2%) / 年化波动，日收益 ×√252。`;
+}
+
+/* ── 逐年 / 水下期 / 历史 ── */
+function renderYear(){
+  const mx=Math.max(...D.yearly.map(y=>Math.abs(y.return)),1);
+  $('#yearTable tbody').innerHTML = D.yearly.slice().reverse().map(y=>{
+    const w=Math.abs(y.return)/mx*100, pos=y.return>=0;
+    return `<tr><td><b>${y.year}</b></td>
+      <td class="num ${cls(y.return)}"><b>${fmtPct(y.return)}</b></td>
+      <td><div style="display:flex;align-items:center;height:14px">
+        <div style="width:50%;display:flex;justify-content:flex-end">
+          ${pos?'':`<span class="bar" style="background:var(--dn);width:${w/2}%"></span>`}</div>
+        <div style="width:1px;height:12px;background:var(--line)"></div>
+        <div style="width:50%">
+          ${pos?`<span class="bar" style="background:var(--up);width:${w/2}%"></span>`:''}</div>
+      </div></td></tr>`;
+  }).join('');
+}
+
+function renderUW(){
+  $('#uwTable tbody').innerHTML = D.underwater.map(s=>
+    `<tr><td>${s.from}</td><td>${s.troughDate}</td>
+      <td class="num dn"><b>${fmtPct(s.depth)}</b></td>
+      <td class="num"><b>${s.days}</b> 日<br><span style="font-size:11px;color:var(--dim2)">约 ${(s.days/21).toFixed(1)} 个月</span></td>
+      <td>${s.to?s.to:'<span class="wa">进行中</span>'}</td></tr>`).join('');
+  const w=D.underwater[0], neg=D.yearly.filter(y=>y.return<0).length;
+  if(w) $('#uwNote').innerHTML =
+    `<b>为什么"${neg===0?'没有亏损年份':'亏损年份很少'}"却有 ${w.days} 个交易日（约 ${(w.days/21).toFixed(1)} 个月）不创新高？</b><br>`+
+    `两个指标的<b>时间切分方式不同</b>：年度收益按日历年切（1/1→12/31）；`+
+    `水下期从<b>任意历史新高</b>起算、可跨年。最长那段 ${w.from} → ${w.to||'今'} 正好横跨两个年度，`+
+    `下跌被 1 月 1 日这条人为的线切成两段，各自被同年的上涨盖过。`+
+    `<b>但账户不会在 1 月 1 日重置</b> —— 这正是"年度收益率会系统性掩盖真实持有体验"的原因，`+
+    `也是专业口径要看「最长水下期」而非只看年度收益的原因。`;
+}
+
+function renderHist(){
+  $('#histTable tbody').innerHTML = D.rebalances.slice().reverse().map(r=>{
+    const top=Object.entries(r.weights).slice(0,5)
+      .map(([c,w])=>`${(D.meta.codes[c]||{}).name||c} ${(w*100).toFixed(0)}%`).join('  ');
+    return `<tr><td>${r.date}</td>
+      <td class="num">${r.nSelected}</td>
+      <td class="num">${r.exAnteVol!=null?(r.exAnteVol*100).toFixed(1)+'%':'—'}</td>
+      <td class="num ${r.scale<0.999?'wa':''}">${r.scale.toFixed(2)}</td>
+      <td class="num">${(r.riskWeight*100).toFixed(1)}%</td>
+      <td class="num">${(r.cashWeight*100).toFixed(1)}%</td>
+      <td class="num" style="color:var(--dim)">${(r.turnover*100).toFixed(0)}%</td>
+      <td style="font-size:12px;color:var(--dim)">${top}</td></tr>`;
+  }).join('');
+}
+
+/* ── 启动 ── */
+fetch('./data/dashboard.json?t='+Date.now())
+  .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status+'（data/dashboard.json 未找到）'); return r.json(); })
+  .then(d=>{
+    D=d; capital=D.meta.capital||100000;
+    $('#capInput').value=capital;
+    $('#bmName').textContent=D.meta.benchName||'基准';
+    renderHead(); renderKpi(); renderWindows(); renderReb();
+    initCharts(); drawCharts('all');
+    renderYear(); renderUW(); renderHist();
+    document.querySelectorAll('#rangeTabs .tab').forEach(t=>t.onclick=()=>{
+      document.querySelectorAll('#rangeTabs .tab').forEach(x=>x.classList.remove('on'));
+      t.classList.add('on'); drawCharts(t.dataset.r);
+    });
+    $('#capInput').oninput=e=>{
+      const v=parseFloat(e.target.value);
+      if(v>0){ capital=v; renderReb(); }
+    };
+    if(D.meta.stale){
+      const e=$('#err'); e.style.display='block'; e.className='';
+      e.style.background='rgba(245,158,11,.1)'; e.style.border='1px solid var(--wa)';
+      e.style.color='#fcd34d';
+      e.innerHTML='<b>⚠ 数据未更新：</b>'+(D.meta.note||'取数失败，当前展示的是上一次成功的快照')+
+        '<br>指标仍基于旧数据计算，请勿据此下单。';
+    }
+  })
+  .catch(e=>showErr(e.message));
+</script>
+</body>
+</html>
