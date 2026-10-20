@@ -52,6 +52,7 @@
 job 超时从 runner 启动后计时；发布尚未取得 runner 时，由下一次发布替换它。
 页面也会按北京时间检查最新交易日，超过 10 个自然日即提示可能停更，
 即使旧 JSON 的 `stale` 字段仍为 `false`。
+手动补跑在收盘前只接收上一工作日及更早的日线，避免把盘中价格写入回测。
 
 若发现停更，先查看 Actions 的 `update` 和 `deploy` 分别卡在哪一步；
 取消异常旧运行后，使用 `gh workflow run dashboard.yml --ref main` 手动补跑，

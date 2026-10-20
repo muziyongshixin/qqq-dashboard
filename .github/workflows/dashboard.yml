@@ -51,6 +51,9 @@ jobs:
           pip install tdxrs
           python -c "import tdxrs, importlib.metadata as m; print('tdxrs', m.version('tdxrs'))"
 
+      - name: 检查已收盘日线过滤
+        run: python -m unittest discover -s dashboard/tools -p 'test_*.py'
+
       - name: 拉取行情（除权监控 → 增量/全量自动切换）
         id: fetch
         timeout-minutes: 12
@@ -104,6 +107,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, sys, datetime
+          from tools.fetch_prices import latest_expected_trade_date
           d = json.load(open('data/dashboard.json'))
           p = json.load(open('data/prices.json'))
           m, c = d['meta'], d['curve']
@@ -123,6 +127,8 @@ jobs:
           gap = (datetime.date.today() - last).days
           if gap > 10:
               errs.append(f"最新交易日 {m['lastTradeDate']} 距今 {gap} 天，数据可能停更")
+          if m['lastTradeDate'] > latest_expected_trade_date():
+              errs.append(f"包含尚未收盘的交易日 {m['lastTradeDate']}")
           # 除权指纹必须齐全：缺失会导致下次无法判断能否增量（只能全量）
           fps = pm.get('xdxrFingerprint') or {}
           missing = [k for k in pm['codes'] if k not in fps]

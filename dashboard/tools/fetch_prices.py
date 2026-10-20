@@ -350,10 +350,12 @@ def _tdxrs_full(cli, xdxr_map=None):
     from tdxrs.constants import KLINE_DAILY
 
     out, total_bad = {}, 0
+    cutoff = latest_expected_trade_date()
     for code, meta in POOL.items():
         mkt = market_of(code)
         try:
             bars = cli.get_fund_bars_all(KLINE_DAILY, mkt, code, MAX_BARS)
+            bars = [b for b in (bars or []) if b.get("datetime", "") <= cutoff]
             if not bars:
                 print("  [WARN] %s 无数据" % code, file=sys.stderr)
                 continue
@@ -439,6 +441,7 @@ def _tdxrs_incremental(cli, cache, tails):
     baseline = cache["prices"]
     out = {c: [list(r) for r in rows] for c, rows in baseline.items()}
     added_total, req_bars = 0, 0
+    cutoff = latest_expected_trade_date()
 
     for code in POOL:
         rows = out.get(code)
@@ -457,9 +460,12 @@ def _tdxrs_incremental(cli, cache, tails):
         raw = {}
         for b in bars:
             try:
-                raw[b["datetime"]] = float(b["close"])
+                if b["datetime"] <= cutoff:
+                    raw[b["datetime"]] = float(b["close"])
             except (KeyError, TypeError, ValueError):
                 continue
+        if not raw:
+            return None, 0, "%s 无已收盘日线" % code
 
         have = dict(rows)
         common = sorted(set(have) & set(raw))
@@ -502,9 +508,10 @@ def _tdxrs_incremental(cli, cache, tails):
 def fetch_eastmoney_one(code, beg, retry=4):
     """东财日线前复权。返回 [(date, close), ...]；失败返回 None。"""
     secid = "%d.%s" % (market_of(code), code)
+    cutoff = latest_expected_trade_date()
     url = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?"
            "secid=%s&fields1=f1,f2,f3,f4,f5&fields2=f51,f53&klt=101&fqt=1"
-           "&beg=%s&end=20500101" % (secid, beg))
+           "&beg=%s&end=%s" % (secid, beg, cutoff.replace("-", "")))
     hdr = {"User-Agent": UA, "Referer": "https://quote.eastmoney.com/",
            "Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9",
            "Connection": "close"}
@@ -516,7 +523,7 @@ def fetch_eastmoney_one(code, beg, retry=4):
             rows = []
             for x in kl:
                 p = x.split(",")
-                if len(p) >= 2:
+                if len(p) >= 2 and p[0] <= cutoff:
                     try:
                         rows.append((p[0], float(p[1])))
                     except ValueError:
@@ -537,6 +544,7 @@ def fetch_sina_one(code, datalen=40, retry=3):
     （单日 |收益| > 15% 视为疑似除权并拒绝拼接），风险可控。
     """
     sym = ("sh" if market_of(code) == 1 else "sz") + code
+    cutoff = latest_expected_trade_date()
     url = ("https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
            "CN_MarketData.getKLineData?symbol=%s&scale=240&ma=no&datalen=%d"
            % (sym, datalen))
@@ -547,7 +555,8 @@ def fetch_sina_one(code, datalen=40, retry=3):
                               "Referer": "https://finance.sina.com.cn/"})
             txt = urllib.request.urlopen(req, timeout=25).read().decode("utf-8", "ignore")
             arr = json.loads(txt)
-            rows = [(x["day"][:10], float(x["close"])) for x in arr if x.get("close")]
+            rows = [(x["day"][:10], float(x["close"])) for x in arr
+                    if x.get("close") and x["day"][:10] <= cutoff]
             if rows:
                 return rows
         except Exception:
