@@ -219,6 +219,17 @@ function showErr(msg){
     '<br>然后访问 <code>http://localhost:8899/</code>（直接双击 HTML 会因浏览器 CORS 限制无法读取 JSON）';
 }
 
+// 即使 Actions 完全没运行，旧快照也不能永久显示“正常”。
+// 与发布自检一样容忍 10 个自然日，覆盖周末及长假；按北京时间判断。
+function staleReason(meta, now=new Date()){
+  const today = now.toLocaleDateString('sv-SE', {timeZone:'Asia/Shanghai'});
+  const age = (Date.parse(today+'T00:00:00+08:00') -
+    Date.parse(meta.lastTradeDate+'T00:00:00+08:00')) / 86400000;
+  if(!Number.isFinite(age)) return '缺少有效的最新交易日，请检查数据更新任务';
+  if(age>10) return `最新交易日为 ${meta.lastTradeDate}，距今 ${Math.floor(age)} 天，自动更新可能已中断`;
+  return meta.stale ? (meta.note||'取数失败，当前展示的是上一次成功的快照') : '';
+}
+
 /* ── 顶部信息 ── */
 function renderHead(){
   const m=D.meta, p=m.params;
@@ -226,7 +237,7 @@ function renderHead(){
     `动量 ${p.lookbacks.join('/')}周（>${p.scoreThreshold*100}%窗口上涨入选） · `+
     `风险 EWMA λ=${p.lambdaEwma} <b class="inf">日频</b> · 目标波动 ${(p.targetVol*100).toFixed(0)}% · `+
     `债券上限 ${(p.bondCap*100).toFixed(0)}% · 不加杠杆`;
-  const stale = m.stale;
+  const stale = !!staleReason(m);
   $('#srcInfo').innerHTML =
     `数据源 <b>${m.dataSource||'—'}</b>`+
     `<span class="tag ${stale?'stale':'ok'}">${stale?'数据未更新':'正常'}</span><br>`+
@@ -525,11 +536,12 @@ fetch('./data/dashboard.json?t='+Date.now())
       const v=parseFloat(e.target.value);
       if(v>0){ capital=v; renderReb(); }
     };
-    if(D.meta.stale){
+    const reason=staleReason(D.meta);
+    if(reason){
       const e=$('#err'); e.style.display='block'; e.className='';
       e.style.background='rgba(245,158,11,.1)'; e.style.border='1px solid var(--wa)';
       e.style.color='#fcd34d';
-      e.innerHTML='<b>⚠ 数据未更新：</b>'+(D.meta.note||'取数失败，当前展示的是上一次成功的快照')+
+      e.innerHTML='<b>⚠ 数据未更新：</b>'+reason+
         '<br>指标仍基于旧数据计算，请勿据此下单。';
     }
   })

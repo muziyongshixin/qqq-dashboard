@@ -22,13 +22,14 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: dashboard-daily
-  cancel-in-progress: false   # 数据任务不要中途取消，避免半截提交
-
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 只串行化取数/提交。Pages 排队不能占住行情更新的锁。
+    concurrency:
+      group: dashboard-update-${{ github.ref }}
+      cancel-in-progress: false
     outputs:
       data_ok: ${{ steps.fetch.outputs.ok }}
     steps:
@@ -52,6 +53,7 @@ jobs:
 
       - name: 拉取行情（除权监控 → 增量/全量自动切换）
         id: fetch
+        timeout-minutes: 12
         working-directory: dashboard
         run: |
           echo "── 更新前快照状态 ──"
@@ -168,6 +170,11 @@ jobs:
     needs: update
     if: needs.update.outputs.data_ok == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 新产物替换卡住的旧发布；取数 job 使用另一把锁，仍可正常提交。
+    concurrency:
+      group: dashboard-pages-${{ github.ref }}
+      cancel-in-progress: true
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
